@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xwyzsn_decorator"
+version = "0.0.1"
+description = "personal decorator wrapper"
+authors = [
+    { name = "JanChi", email = "xwyzsn@gmail.com" }
+]
+
+dependencies=[
+    "cloudpickle>=2.2.1",
+    "tornado>=6.3.2"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["decorator"]
+
