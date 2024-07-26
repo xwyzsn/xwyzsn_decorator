@@ -9,6 +9,7 @@ description = "personal decorator wrapper"
 authors = [
     { name = "JanChi", email = "xwyzsn@gmail.com" }
 ]
+readme = "README.md"
 
 dependencies=[
     "cloudpickle>=2.2.1",
