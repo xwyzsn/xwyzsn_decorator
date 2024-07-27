@@ -8,7 +8,7 @@ from itertools import product
 from tornado import concurrent
 from multiprocessing import Process
 import cloudpickle
-from typing import Dict,List,Any
+from typing import Dict, List, Any
 
 import sqlite3
 import pandas as pd
@@ -24,10 +24,7 @@ sqlite3.register_converter("JSON", json.loads)
 
 
 def dict_hash(dictionary: Dict[str, Any]) -> str:
-    """MD5 hash of a dictionary."""
     dhash = hashlib.md5()
-    # We need to sort arguments so {'a': 1, 'b': 2} is
-    # the same as {'b': 2, 'a': 1}
     encoded = json.dumps(dictionary, sort_keys=True).encode()
     dhash.update(encoded)
     return dhash.hexdigest()
@@ -42,7 +39,7 @@ class CloudpickleProcessPoolExecutor(ProcessPoolExecutor):
         return super().submit(apply_cloudpickle, cloudpickle.dumps(fn), *args, **kwargs)
 
 
-def create_db():
+def create_db(db_path: str):
     try:
         create_table = """
             CREATE TABLE IF NOT EXISTS result (
@@ -51,24 +48,23 @@ def create_db():
                 `result` JSON
                 )
             """
-        conn = sqlite3.connect("result.db", detect_types=sqlite3.PARSE_DECLTYPES)
+        conn = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
         cursor = conn.cursor()
         cursor.execute(create_table)
         conn.commit()
         conn.close()
-        return True 
+        return True
     except Exception as e:
-        e.with_traceback(e.__traceback__)
-        raise e
-    
+        raise e.with_traceback()
 
-def _write(results:list[dict], write_list:list):
+
+def _write(db_path: str, results: list[dict], write_list: list):
     try:
-        conn = sqlite3.connect("result.db", detect_types=sqlite3.PARSE_DECLTYPES)
+        conn = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
         cursor = conn.cursor()
         newly_inserted = []
-        for result in results:
-            if result not in write_list:
+        for result in list(results):
+            if result not in list(write_list):
                 newly_inserted.append(result)
         config = [r["config"] for r in newly_inserted]
         result = [r["result"] for r in newly_inserted]
@@ -78,42 +74,43 @@ def _write(results:list[dict], write_list:list):
         write_list.extend(newly_inserted)
         return True
     except Exception as e:
-        e.with_traceback(e.__traceback__)
-        raise e
+        raise e.with_traceback()
 
-def write_process(result:list[dict],write_list:list,lock):
+def write_process(result: list[dict], write_list: list, lock):
     try:
         time.sleep(10)
         with lock:
             _write(result, write_list)
     except Exception as e:
-        e.with_traceback(e.__traceback__)
-        raise e
-    
-def _read():
-    conn = sqlite3.connect('result.db', detect_types=sqlite3.PARSE_DECLTYPES)
+        raise e.with_traceback()
+
+def _read(df_path):
+    conn = sqlite3.connect(df_path, detect_types=sqlite3.PARSE_DECLTYPES)
     c = conn.cursor()
     result = c.execute("SELECT * FROM result").fetchall()
     conn.close()
     return result
 
-def gradio_process(fn=None):
+
+def gradio_process(db_path, fn=None):
     def fetch_data():
-        df = pd.DataFrame(_read())
+        df = pd.DataFrame(_read(db_path))
         if len(df) == 0:
             return pd.DataFrame([])
         df.columns = ['id', 'config', 'result']
         result = pd.concat([json_normalize(df['config']), json_normalize(df['result'])], axis=1)
         return result
-    demo = gr.Interface(None, [], outputs=[gr.DataFrame(value=[fetch_data,fn][fn is not None], every=10, height=300, interactive=True)],
-                            live=True)
+
+    demo = gr.Interface(None, [], outputs=[
+        gr.DataFrame(value=[fetch_data, fn][fn is not None], every=10, height=300, interactive=True)],
+                        live=True)
     demo.launch()
 
 
-
-def search_with_cuda(search_space: dict, workers: int = 2, call_back_fn=lambda x:x, devices=None,gradio_fn= None):
+def search_with_cuda(search_space: dict, db_path: str, workers: int = 2, call_back_fn=lambda x: x, devices=None,
+                     gradio_fn=None):
     def wrapper(func):
-        create_db()
+        create_db(db_path)
         space = search_space.values()
         search_item = list(product(*space))
         keys = search_space.keys()
@@ -123,11 +120,9 @@ def search_with_cuda(search_space: dict, workers: int = 2, call_back_fn=lambda x
         semaphore = manager.Semaphore(len(devices))
         results = manager.list()
         write_list = manager.list()
-        gr_process = Process(target=gradio_process, args=(gradio_fn,))
+        gr_process = Process(target=gradio_process, args=(db_path, gradio_fn))
         gr_process.start()
         lock = manager.Lock()
-        writer_process = Process(target=write_process, args=(results, write_list, lock))
-        writer_process.start()
         for item in devices:
             q.put(item)
         def fn(func, config, semaphore, q, results, lock, *args, **kwargs):
@@ -137,10 +132,11 @@ def search_with_cuda(search_space: dict, workers: int = 2, call_back_fn=lambda x
             func_fn = partial(func, config)
             try:
                 result = func_fn(*args, **kwargs)
-            except Exception as e :
+            except Exception as e:
                 e.with_traceback(e.__traceback__)
             with lock:
                 results.append({"config": config, "result": result})
+                _write(db_path, results, write_list)
             q.put(device)
             semaphore.release()
         @wraps(func)
@@ -151,8 +147,7 @@ def search_with_cuda(search_space: dict, workers: int = 2, call_back_fn=lambda x
                             for config in search_item]
                     for job in concurrent.futures.as_completed(jobs):
                         job.result()
-                    _write(results, write_list)
-                    writer_process.terminate()
+                    _write(db_path, results, write_list)
                     return call_back_fn(list(results))
             except Exception as e:
                 call_back_fn(list(results))
@@ -163,9 +158,8 @@ def search_with_cuda(search_space: dict, workers: int = 2, call_back_fn=lambda x
 
 
 if __name__ == '__main__':
-
     @search_with_cuda(search_space={"dim": [64, 128, 256, 512], "look_back": [512, 720]}, workers=4,
-            call_back_fn=lambda x:print(x), devices=["1", "2"])
+                      call_back_fn=lambda x: print(x), devices=["1", "2"])
     def idle_fn(config):
         sleep = random.randint(1, 10)
         print(f"{os.getpid()} ENV{os.getenv('test', None)} sleep")
