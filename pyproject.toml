@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "xwyzsn_decorator"
-version = "0.0.2"
+version = "0.0.3"
 description = "personal decorator wrapper"
 authors = [
     { name = "JanChi", email = "xwyzsn@gmail.com" }
@@ -19,5 +19,5 @@ dependencies=[
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["decorator"]
+packages = ["x_decorator"]
 
