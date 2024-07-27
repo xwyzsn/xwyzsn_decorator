@@ -55,7 +55,7 @@ def create_db(db_path: str):
         conn.close()
         return True
     except Exception as e:
-        raise e.with_traceback()
+        raise e.with_traceback(e.__traceback__s)
 
 
 def _write(db_path: str, results: list[dict], write_list: list):
@@ -74,7 +74,7 @@ def _write(db_path: str, results: list[dict], write_list: list):
         write_list.extend(newly_inserted)
         return True
     except Exception as e:
-        raise e.with_traceback()
+        raise e.with_traceback(e.__traceback__)
 
 def write_process(result: list[dict], write_list: list, lock):
     try:
@@ -82,7 +82,7 @@ def write_process(result: list[dict], write_list: list, lock):
         with lock:
             _write(result, write_list)
     except Exception as e:
-        raise e.with_traceback()
+        raise e.with_traceback(e.__traceback__)
 
 def _read(df_path):
     conn = sqlite3.connect(df_path, detect_types=sqlite3.PARSE_DECLTYPES)
