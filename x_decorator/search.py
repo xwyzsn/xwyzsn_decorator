@@ -55,7 +55,7 @@ def create_db(db_path: str):
         conn.close()
         return True
     except Exception as e:
-        raise e.with_traceback(e.__traceback__s)
+        raise e.with_traceback(e.__traceback__)
 
 
 def _write(db_path: str, results: list[dict], write_list: list):
