@@ -110,3 +110,23 @@ if __name__ == "__main__":
     print(results)
 
 ```
+
+### parallel_apply
+
+```python
+from x_decorator.parallel_apply import parallel_apply
+import pandas as pd 
+# pd.DataFrame.p_apply = parallel_apply
+if __name__ == "__main__":
+    # Example usage
+    df = pd.DataFrame({
+        'A': range(10),
+        'B': range(10, 20)
+    })
+    def example_func(row):
+        return row['A'] + row['B']
+    # or df.p_apply(example_func,is_parallel=True, show_progress=True)
+    result = parallel_apply(df, example_func, axis=1, is_parallel=True, show_progress=True)
+    print(result)
+
+```
