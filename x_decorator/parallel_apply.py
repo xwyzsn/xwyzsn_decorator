@@ -24,16 +24,15 @@ def make_picklable(func):
 # -----------------------
 # Internal worker (must be global for pickling)
 # -----------------------
-def _apply_chunk(chunk, func_serialized, axis, raw, result_type, args):
+def _apply_chunk(obj_chunk, func_serialized, apply_kwargs):
     func = cloudpickle.loads(func_serialized)
-    return chunk.apply(func, axis=axis, raw=raw, result_type=result_type, args=args)
-
+    return obj_chunk.apply(func, **apply_kwargs)
 
 # -----------------------
 # Main function
 # -----------------------
 def parallel_apply(
-    df: pd.DataFrame,
+    obj: pd.DataFrame| pd.Series,
     func,
     axis=1,
     raw=False,
@@ -61,6 +60,8 @@ def parallel_apply(
         pd.Series or pd.DataFrame
     """
     if not is_parallel:
+        if isinstance(obj, pd.Series):
+            return obj.applu(func,args=args)
         return df.apply(func, axis=axis, raw=raw, result_type=result_type, args=args)
 
     if chunks is None:
@@ -68,17 +69,23 @@ def parallel_apply(
 
     # Pickle the function (lambda or otherwise)
     func_serialized = cloudpickle.dumps(func)
+    apply_kwargs = {'args': args}
+    if isinstance(obj, pd.DataFrame):
+        apply_kwargs.update({'axis': axis, 'raw': raw, 'result_type': result_type})
 
     # Split data
-    split_data = (
-        np.array_split(df, chunks, axis=1 if axis == 0 else 0)
-    )
+    if isinstance(obj, pd.Series):
+        split_data = np.array_split(obj, chunks)
+    elif axis ==0:
+        split_data = np.array_split(obj, chunks, axis=1)
+    else:
+        split_data = np.array_split(obj, chunks, axis=0)
 
     results = [None] * len(split_data)
 
     with ProcessPoolExecutor(max_workers=chunks) as executor:
         futures = {
-            executor.submit(_apply_chunk, chunk, func_serialized, axis, raw, result_type, args): idx
+            executor.submit(_apply_chunk, chunk, func_serialized, apply_kwargs): idx
             for idx, chunk in enumerate(split_data)
         }
 
@@ -94,7 +101,10 @@ def parallel_apply(
         if show_progress:
             pbar.close()
 
-    return pd.concat(results)
+    if isinstance(results[0],pd.DataFrame):
+        return pd.concat(results, axis=1 if axis == 0 else 0)
+    else:
+        return pd.concat(results)
 
 if __name__ == "__main__":
     # Example usage
@@ -108,3 +118,7 @@ if __name__ == "__main__":
 
     result = parallel_apply(df, example_func, axis=1, is_parallel=True, show_progress=True)
     print(result)
+
+    s = pd.Series(range(100000))
+    res = parallel_apply(s, lambda x: x ** 2, is_parallel=True, show_progress=True)
+    print(res)
